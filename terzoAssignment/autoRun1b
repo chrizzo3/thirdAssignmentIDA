@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Abilita lo script a fermarsi in caso di errore
+set -euo pipefail
+
+# --- 1. Configurazione del Benchmark (Test 1b) ---
+
+# Durata (in secondi) per i test di "rottura" 
+BREAKPOINT_DURATION="30s"
+
+# Incrementiamo da 50 a 1000, con step di 50
+CONCURRENCY_LEVELS=$(seq 50 50 1000)
+
+# Definizioni dei server
+declare -A SERVERS
+SERVERS["apache"]="http://localhost:8080"
+SERVERS["nginx"]="http://localhost:8081"
+SERVERS["litespeed"]="http://localhost:8082"
+
+# Definizioni dei file da testare
+STATIC_CONTENT="/index.html"
+
+# Cartelle per i risultati
+RESULTS_DIR_1B="results_test_1b"
+
+# Crea le cartelle se non esistono
+mkdir -p "$RESULTS_DIR_1B"
+
+# Pausa in secondi tra un test e l'altro per far "raffreddare" i server
+COOLDOWN=2
+
+# --- 2. Esecuzione Test 1(b): Punto di Rottura (Contenuto Statico) ---
+# 
+echo "================================================="
+echo "INIZIO TEST 1(b): Individuazione Punto di Rottura"
+echo "Contenuto: Statico (come da Traccia )" 
+echo "Durata per test: $BREAKPOINT_DURATION"
+echo "================================================="
+
+content_type="static"
+    
+for server_name in "${!SERVERS[@]}"; do
+    echo
+    echo "--- Test Server: $server_name ---"
+    
+    for concurrency in $CONCURRENCY_LEVELS; do
+        TARGET_URL="${SERVERS[$server_name]}${STATIC_CONTENT}"
+        OUTPUT_FILE="${RESULTS_DIR_1B}/${server_name}_${content_type}_c${concurrency}.csv"
+        
+        echo "    -> Concorrenza: ${concurrency} utenti. Output: $OUTPUT_FILE"
+        
+        # Esegue hey con -z (durata) e -c (concorrenza)
+        # Salva l'output (-o) in formato csv
+        # Usiamo '|| true' per non far fallire lo script se hey
+        # restituisce un errore (es. troppi errori di connessione),
+        # che è proprio quello che cerchiamo per il punto di rottura.
+        hey -z "$BREAKPOINT_DURATION" -c "$concurrency" -o csv "$TARGET_URL" > "$OUTPUT_FILE" || true
+        
+        echo "    -> Test completato. Pausa di $COOLDOWN secondi..."
+        sleep "$COOLDOWN"
+    done
+done
+
+echo "================================================="
+echo "TEST 1(b) COMPLETATO. Risultati in: $RESULTS_DIR_1B"
+echo "================================================="
+echo
